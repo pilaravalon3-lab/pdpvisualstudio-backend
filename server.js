@@ -7,6 +7,7 @@
 const express = require('express');
 const cors = require('cors');
 const rateLimit = require('express-rate-limit');
+try { require('dotenv').config(); } catch(e) {}
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -62,33 +63,18 @@ app.get('/', (req, res) => {
 // POST /api/enhance-keywords
 // ═══════════════════════════════════════════════════════
 app.post('/api/enhance-keywords', async (req, res) => {
-  const { keywords, concepto, copy, industry, format, mood, style, ai } = req.body;
+  const { keywords, concepto, copy, industry, format, mood, style, ai, systemPrompt: sp, userMsg: um } = req.body;
   const preferredAI = ai || 'gemini';
 
-  const systemPrompt = `Sos un director de arte especializado en búsqueda de imágenes para redes sociales. 
-Recibís keywords de búsqueda para bancos de imágenes (Shutterstock, Getty, Unsplash) y los mejorás siguiendo estas reglas estrictas:
+  // Accept either pre-built prompts from frontend or build from fields
+  const systemPrompt = sp || `Sos un director de arte especializado en búsqueda de imágenes para redes sociales. 
+Recibís keywords de búsqueda para bancos de imágenes (Shutterstock, Getty, Unsplash) y los mejorás.
+REGLAS: 1. Siempre en inglés 2. NUNCA copiar la bajada 3. Combinar: Concepto + Acción + Contexto 4. Agregar estética 5. Prosa narrativa
+Respondé SOLO con JSON: {"mejorados": ["keyword1",...,"keyword12"], "razon": "..."}`;
 
-REGLAS CLAVE:
-1. Siempre en inglés
-2. NUNCA copiar la bajada/copy literalmente — interpretar la intención visual
-3. Estructuras válidas: [acción]+[contexto]+[usuario]+[estilo] | [estilo]+[contexto] | [estilo puro] | [contexto]+[usuario] | [acción]+[contexto]
-4. Combinar 3 capas: Concepto + Acción + Contexto
-5. Siempre agregar estética: warm light, natural light, candid, lifestyle, cinematic, etc.
-6. NO usar: isolated product, overly staged poses, extreme close-ups without context
-7. Prosa narrativa, no sopa de tags.
-
-Respondé SOLO con JSON válido, sin markdown:
-{"mejorados": ["keyword1", "keyword2", ..., "keyword12"], "razon": "explicación breve en español"}`;
-
-  const userMsg = `Concepto/bajada: "${concepto} ${copy}"
-Industria: ${industry}
-Formato: ${format}
-Mood KV: ${mood}
-Estilo KV: ${style}
-
-Keywords actuales a mejorar:
-${keywords}
-
+  const userMsg = um || `Concepto: "${concepto || ''} ${copy || ''}"
+Industria: ${industry || ''} | Formato: ${format || ''} | Mood: ${mood || ''} | Estilo: ${style || ''}
+Keywords: ${keywords || ''}
 Generá 12 keywords mejorados.`;
 
   try {
@@ -142,20 +128,15 @@ Respondé SOLO con el prompt mejorado en inglés, sin markdown.`;
 // POST /api/enhance-designs
 // ═══════════════════════════════════════════════════════
 app.post('/api/enhance-designs', async (req, res) => {
-  const { concepto, copy, format, colors, fonts, industry, ai } = req.body;
+  const { concepto, copy, format, colors, fonts, industry, ai, systemPrompt: sp, userMsg: um } = req.body;
   const preferredAI = ai || 'gemini';
 
-  const systemPrompt = `Sos un director de arte experto en diseño para redes sociales.
+  const systemPrompt = sp || `Sos un director de arte experto en diseño para redes sociales.
 Sugerí 3 direcciones creativas para piezas de diseño (SVG) de un posteo de Instagram.
 Cada dirección: nombre, layout, paleta, tipografia, elementos, mood.
 Respondé SOLO con JSON: {"direcciones": [...]}`;
 
-  const userMsg = `Concepto: "${concepto}"
-Copy: "${copy}"
-Formato: ${format}
-Colores: ${colors}
-Tipografías: ${fonts}
-Industria: ${industry}`;
+  const userMsg = um || `Concepto: "${concepto || ''}" Copy: "${copy || ''}" Formato: ${format || ''} Colores: ${colors || ''} Tipografías: ${fonts || ''} Industria: ${industry || ''}`;
 
   try {
     let result;
@@ -223,7 +204,7 @@ async function callClaudeText(systemPrompt, userMsg) {
 // Gemini — JSON response
 async function callGemini(systemPrompt, userMsg) {
   const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${GEMINI_API_KEY}`,
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -243,7 +224,7 @@ async function callGemini(systemPrompt, userMsg) {
 // Gemini — Text response
 async function callGeminiText(systemPrompt, userMsg) {
   const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${GEMINI_API_KEY}`,
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
