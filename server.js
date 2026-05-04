@@ -209,16 +209,32 @@ async function callGemini(systemPrompt, userMsg) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        system_instruction: { parts: { text: systemPrompt } },
-        contents: { parts: [{ text: userMsg }] },
-        generation_config: { max_output_tokens: 1000, response_mime_type: 'application/json' }
+        system_instruction: { parts: [{ text: systemPrompt }] },
+        contents: [{ parts: [{ text: userMsg }] }],
+        generation_config: { 
+          max_output_tokens: 2048,
+          response_mime_type: 'application/json',
+          thinking_config: { thinking_budget: 0 }
+        }
       })
     }
   );
-  if (!response.ok) throw new Error(`Gemini error: ${response.status}`);
+  if (!response.ok) {
+    const errBody = await response.text();
+    console.error('Gemini raw error:', errBody);
+    throw new Error(`Gemini error: ${response.status}`);
+  }
   const data = await response.json();
-  const raw = data.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
-  return JSON.parse(raw.replace(/```json|```/g, '').trim());
+  const raw = data.candidates?.[0]?.content?.parts?.filter(p => p.text)?.map(p => p.text)?.join('') || '{}';
+  try {
+    return JSON.parse(raw.replace(/```json|```/g, '').trim());
+  } catch(e) {
+    console.error('Gemini JSON parse error. Raw:', raw.substring(0, 500));
+    // Try to extract JSON from partial response
+    const match = raw.match(/\{[\s\S]*\}/);
+    if (match) return JSON.parse(match[0]);
+    throw new Error('Gemini devolvió JSON inválido');
+  }
 }
 
 // Gemini — Text response
@@ -229,15 +245,18 @@ async function callGeminiText(systemPrompt, userMsg) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        system_instruction: { parts: { text: systemPrompt } },
-        contents: { parts: [{ text: userMsg }] },
-        generation_config: { max_output_tokens: 800 }
+        system_instruction: { parts: [{ text: systemPrompt }] },
+        contents: [{ parts: [{ text: userMsg }] }],
+        generation_config: { 
+          max_output_tokens: 2048,
+          thinking_config: { thinking_budget: 0 }
+        }
       })
     }
   );
   if (!response.ok) throw new Error(`Gemini error: ${response.status}`);
   const data = await response.json();
-  return data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+  return data.candidates?.[0]?.content?.parts?.filter(p => p.text)?.map(p => p.text)?.join('') || '';
 }
 
 // ─── START SERVER ───
