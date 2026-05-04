@@ -13,19 +13,21 @@ const PORT = process.env.PORT || 3000;
 
 // ─── CORS: permitir solo tu dominio de GitHub Pages ───
 const ALLOWED_ORIGINS = [
-  'https://pilarc.github.io',            // ← Cambiá por tu usuario
+  'https://pilaravalon3-lab.github.io',
   'http://localhost:3000',
-  'http://127.0.0.1:5500',               // Live Server (VS Code)
-  'null'                                   // File protocol (local)
+  'http://127.0.0.1:5500',
+  'null'
 ];
 
 app.use(cors({
   origin: (origin, callback) => {
-    if (!origin || ALLOWED_ORIGINS.some(o => origin.startsWith(o))) {
-      callback(null, true);
-    } else {
-      callback(new Error('CORS blocked'));
+    // Allow requests with no origin (mobile apps, curl, etc)
+    if (!origin) return callback(null, true);
+    // Allow any github.io subdomain
+    if (origin.includes('github.io') || ALLOWED_ORIGINS.includes(origin)) {
+      return callback(null, true);
     }
+    callback(new Error('CORS blocked'));
   }
 }));
 
