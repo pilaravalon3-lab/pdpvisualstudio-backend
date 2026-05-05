@@ -67,10 +67,34 @@ app.post('/api/enhance-keywords', async (req, res) => {
   const preferredAI = ai || 'gemini';
 
   // Accept either pre-built prompts from frontend or build from fields
-  const systemPrompt = sp || `Sos un director de arte especializado en búsqueda de imágenes para redes sociales. 
-Recibís keywords de búsqueda para bancos de imágenes (Shutterstock, Getty, Unsplash) y los mejorás.
-REGLAS: 1. Siempre en inglés 2. NUNCA copiar la bajada 3. Combinar: Concepto + Acción + Contexto 4. Agregar estética 5. Prosa narrativa
-Respondé SOLO con JSON: {"mejorados": ["keyword1",...,"keyword12"], "razon": "..."}`;
+  const systemPrompt = sp || `Sos un director de arte experto en búsqueda de imágenes para bancos de stock (Shutterstock, Getty, Unsplash, Freepik, iStock).
+
+REGLA #1 — LONGITUD: Cada keyword debe tener entre 3 y 6 palabras MÁXIMO. NUNCA más de 6.
+EJEMPLOS BUENOS (3-6 palabras):
+- "warm light home interior"
+- "candid family moment"
+- "modern office natural light"
+- "outdoor park golden hour"
+
+EJEMPLOS MALOS (muy largos):
+- "before and after moment transitional space 30 a professional" ❌
+- "person walking outdoor at golden hour with warm tones lifestyle photography" ❌
+
+REGLA #2 — IDIOMA: Siempre en inglés.
+
+REGLA #3 — INTERPRETAR, NO COPIAR: Si la bajada dice "Acompañamos en cada etapa", NO escribas "accompany in each stage". Escribí "family support warm moment" o "caring hands together".
+
+REGLA #4 — ESTRUCTURAS VÁLIDAS:
+1. [acción] + [contexto]: "working in cafe"
+2. [estilo] + [contexto]: "cinematic lighting office"  
+3. [contexto] + [usuario]: "modern office professional"
+4. [estilo puro]: "warm tones, candid lifestyle"
+
+REGLA #5 — AGREGÁ ESTÉTICA: warm light, natural light, candid, lifestyle, cinematic, soft light, golden hour, editorial.
+
+EVITAR: isolated product, overly staged, extreme close-up.
+
+Respondé SOLO con JSON: {"mejorados": ["keyword1", ..., "keyword12"], "razon": "..."}`;
 
   const userMsg = um || `Concepto: "${concepto || ''} ${copy || ''}"
 Industria: ${industry || ''} | Formato: ${format || ''} | Mood: ${mood || ''} | Estilo: ${style || ''}
@@ -98,21 +122,23 @@ Generá 12 keywords mejorados.`;
 // POST /api/enhance-prompt
 // ═══════════════════════════════════════════════════════
 app.post('/api/enhance-prompt', async (req, res) => {
-  const { prompt, ai } = req.body;
+  const { prompt, ai, systemPrompt: sp, userMsg: um } = req.body;
   const preferredAI = ai || 'gemini';
 
-  const systemPrompt = `Sos un director de fotografía especializado en prompts para IA generativa.
+  const systemPrompt = sp || `Sos un director de fotografía especializado en prompts para IA generativa.
 Recibís un prompt en inglés y lo mejorás: de sopa de tags a PROSA NARRATIVA.
 Fórmula: [Sujeto] + [Acción/Gesto] + [Entorno] + [Iluminación] + [Estilo]
 ELIMINAR: 4k, 8k, hyperrealistic, professional photography, high detail
 Respondé SOLO con el prompt mejorado en inglés, sin markdown.`;
 
+  const userContent = um || `Mejorá este prompt:\n\n${prompt}`;
+
   try {
     let result;
     if (preferredAI === 'gemini' && GEMINI_API_KEY) {
-      result = await callGeminiText(systemPrompt, `Mejorá este prompt:\n\n${prompt}`);
+      result = await callGeminiText(systemPrompt, userContent);
     } else if (CLAUDE_API_KEY) {
-      result = await callClaudeText(systemPrompt, `Mejorá este prompt:\n\n${prompt}`);
+      result = await callClaudeText(systemPrompt, userContent);
     } else {
       return res.status(500).json({ error: 'No API keys configured on server' });
     }
@@ -212,7 +238,7 @@ async function callGemini(systemPrompt, userMsg) {
         system_instruction: { parts: [{ text: systemPrompt }] },
         contents: [{ parts: [{ text: userMsg }] }],
         generation_config: { 
-          max_output_tokens: 2048,
+          max_output_tokens: 8192,
           response_mime_type: 'application/json',
           thinking_config: { thinking_budget: 0 }
         }
@@ -232,7 +258,20 @@ async function callGemini(systemPrompt, userMsg) {
     console.error('Gemini JSON parse error. Raw:', raw.substring(0, 500));
     // Try to extract JSON from partial response
     const match = raw.match(/\{[\s\S]*\}/);
-    if (match) return JSON.parse(match[0]);
+    if (match) {
+      try { return JSON.parse(match[0]); } catch {}
+      // Try to repair truncated JSON by closing arrays/objects
+      let repaired = match[0];
+      const openBraces = (repaired.match(/\{/g) || []).length;
+      const closeBraces = (repaired.match(/\}/g) || []).length;
+      const openBrackets = (repaired.match(/\[/g) || []).length;
+      const closeBrackets = (repaired.match(/\]/g) || []).length;
+      // Remove last incomplete element
+      repaired = repaired.replace(/,\s*[^,}\]]*$/, '');
+      for (let i = 0; i < openBrackets - closeBrackets; i++) repaired += ']';
+      for (let i = 0; i < openBraces - closeBraces; i++) repaired += '}';
+      try { return JSON.parse(repaired); } catch {}
+    }
     throw new Error('Gemini devolvió JSON inválido');
   }
 }
@@ -259,18 +298,6 @@ async function callGeminiText(systemPrompt, userMsg) {
   return data.candidates?.[0]?.content?.parts?.filter(p => p.text)?.map(p => p.text)?.join('') || '';
 }
 
-// ─── START SERVER ───
-app.listen(PORT, () => {
-  console.log(`
-╔══════════════════════════════════════════════╗
-║  PDP Visual Studio — API Proxy              ║
-║  Puerto: ${PORT}                               ║
-║  Claude: ${CLAUDE_API_KEY ? '✓ configurado' : '✗ falta CLAUDE_API_KEY'}          ║
-║  Gemini: ${GEMINI_API_KEY ? '✓ configurado' : '✗ falta GEMINI_API_KEY'}          ║
-╚══════════════════════════════════════════════╝
-  `);
-});
-
 // ═══════════════════════════════════════════════════════
 // ENDPOINT: Generar piezas SVG con IA
 // POST /api/generate-svg
@@ -279,24 +306,26 @@ app.post('/api/generate-svg', async (req, res) => {
   const { concepto, copy, format, colors, fonts, industry, pilar, ai } = req.body;
   const preferredAI = ai || 'gemini';
 
-  const systemPrompt = `Sos un diseñador gráfico experto en piezas para redes sociales. 
-Generás código SVG listo para usar. Las piezas son para posteos de Instagram.
+  const systemPrompt = `Sos un diseñador gráfico experto en piezas para Instagram. Generás SVG editorial.
 
 REGLAS ESTRICTAS:
-1. Responder SOLO con JSON válido, sin markdown
-2. Cada SVG debe tener viewBox="0 0 1080 1440" (vertical) o "0 0 1080 1080" (cuadrado)
-3. Usar SOLO los colores que te pasan
-4. Usar font-family con las tipografías que te pasan
-5. El concepto y copy deben aparecer integrados en el diseño
-6. Los diseños deben ser creativos, editoriales, profesionales
-7. NO usar imágenes externas ni links
-8. Cada SVG debe ser autónomo y renderizable
-9. Usar formas geométricas, gradients, composición tipográfica fuerte
-10. Generar exactamente 6 piezas distintas
+1. Responder SOLO con JSON válido, sin markdown ni \`\`\`
+2. Cada SVG: viewBox="0 0 1080 1080" (cuadrado) o "0 0 1080 1440" (vertical)
+3. USAR SOLO los colores que te paso (no inventar otros)
+4. font-family con las tipografías del usuario
+5. SVG corto: máximo 800 caracteres por SVG, sin filtros complejos, sin defs anidadas
+6. Cada pieza debe verse profesional y editorial, NO genérica
+7. Incluir el concepto/copy en el diseño (puede estar abreviado)
+8. Generar EXACTAMENTE 3 piezas distintas
 
-FORMATOS DE NOMBRE: Hero Bold, Split Layout, Editorial Type, Minimal Circle, Quote Frame, CTA Strong
+ESTILOS DE PIEZAS:
+- "Editorial": tipografía grande, negative space, jerarquía clara
+- "Brutalist": contraste alto, formas geométricas, color blocking  
+- "Minimal": simple, una idea, mucho aire
 
-Responder con: {"piezas": [{"name": "nombre", "svg": "<svg>...</svg>"}]}`;
+NO USAR: imágenes externas, links http, filters complejos, gradients muy elaborados.
+
+Respondé con: {"piezas": [{"name": "Editorial", "svg": "<svg ...>...</svg>"}, ...]}`;
 
   const userMsg = `Concepto: "${concepto}"
 Copy: "${copy}"
@@ -306,7 +335,7 @@ Tipografías: ${fonts}
 Industria: ${industry}
 Pilar: ${pilar}
 
-Generá 6 piezas SVG creativas y profesionales.`;
+Generá 3 piezas SVG distintas en estilo editorial, brutalista y minimal.`;
 
   try {
     let result;
