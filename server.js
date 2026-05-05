@@ -293,9 +293,18 @@ async function callGeminiText(systemPrompt, userMsg) {
       })
     }
   );
-  if (!response.ok) throw new Error(`Gemini error: ${response.status}`);
+  if (!response.ok) {
+    const errBody = await response.text();
+    console.error('Gemini text error:', errBody);
+    throw new Error(`Gemini error: ${response.status}`);
+  }
   const data = await response.json();
-  return data.candidates?.[0]?.content?.parts?.filter(p => p.text)?.map(p => p.text)?.join('') || '';
+  const text = data.candidates?.[0]?.content?.parts?.filter(p => p.text)?.map(p => p.text)?.join('') || '';
+  if (!text) {
+    console.error('Gemini returned empty. Full response:', JSON.stringify(data).substring(0, 500));
+    throw new Error('Gemini devolvió respuesta vacía');
+  }
+  return text.trim();
 }
 
 // ═══════════════════════════════════════════════════════
