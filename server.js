@@ -270,3 +270,61 @@ app.listen(PORT, () => {
 ╚══════════════════════════════════════════════╝
   `);
 });
+
+// ═══════════════════════════════════════════════════════
+// ENDPOINT: Generar piezas SVG con IA
+// POST /api/generate-svg
+// ═══════════════════════════════════════════════════════
+app.post('/api/generate-svg', async (req, res) => {
+  const { concepto, copy, format, colors, fonts, industry, pilar, ai } = req.body;
+  const preferredAI = ai || 'gemini';
+
+  const systemPrompt = `Sos un diseñador gráfico experto en piezas para redes sociales. 
+Generás código SVG listo para usar. Las piezas son para posteos de Instagram.
+
+REGLAS ESTRICTAS:
+1. Responder SOLO con JSON válido, sin markdown
+2. Cada SVG debe tener viewBox="0 0 1080 1440" (vertical) o "0 0 1080 1080" (cuadrado)
+3. Usar SOLO los colores que te pasan
+4. Usar font-family con las tipografías que te pasan
+5. El concepto y copy deben aparecer integrados en el diseño
+6. Los diseños deben ser creativos, editoriales, profesionales
+7. NO usar imágenes externas ni links
+8. Cada SVG debe ser autónomo y renderizable
+9. Usar formas geométricas, gradients, composición tipográfica fuerte
+10. Generar exactamente 6 piezas distintas
+
+FORMATOS DE NOMBRE: Hero Bold, Split Layout, Editorial Type, Minimal Circle, Quote Frame, CTA Strong
+
+Responder con: {"piezas": [{"name": "nombre", "svg": "<svg>...</svg>"}]}`;
+
+  const userMsg = `Concepto: "${concepto}"
+Copy: "${copy}"
+Formato: ${format}
+Colores de marca: ${colors}
+Tipografías: ${fonts}
+Industria: ${industry}
+Pilar: ${pilar}
+
+Generá 6 piezas SVG creativas y profesionales.`;
+
+  try {
+    let result;
+    if (preferredAI === 'gemini' && GEMINI_API_KEY) {
+      result = await callGemini(systemPrompt, userMsg);
+    } else if (CLAUDE_API_KEY) {
+      result = await callClaude(systemPrompt, userMsg);
+    } else {
+      return res.status(500).json({ error: 'No API keys configured' });
+    }
+    res.json(result);
+  } catch (err) {
+    console.error('generate-svg error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── START SERVER ───
+app.listen(PORT, () => {
+  console.log(`PDP Visual Studio API Proxy | Port: ${PORT} | Claude: ${CLAUDE_API_KEY ? 'OK' : 'missing'} | Gemini: ${GEMINI_API_KEY ? 'OK' : 'missing'}`);
+});
