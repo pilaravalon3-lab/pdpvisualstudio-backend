@@ -362,6 +362,48 @@ Generá 3 piezas SVG distintas en estilo editorial, brutalista y minimal.`;
   }
 });
 
+// ─── DESCRIBE IMAGE (for Asset Finder reverse search) ───
+app.post('/api/describe-image', async (req, res) => {
+  try {
+    const { image, mimeType } = req.body;
+    if (!image) return res.status(400).json({ error: 'No image provided' });
+    if (!GEMINI_API_KEY) return res.status(500).json({ error: 'Gemini API key not configured' });
+
+    const geminiRes = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          generationConfig: { temperature: 0.3, maxOutputTokens: 200, thinking_config: { thinking_budget: 0 } },
+          contents: [{
+            parts: [
+              { inlineData: { mimeType: mimeType || 'image/jpeg', data: image } },
+              { text: 'Describe this image in 3-6 English keywords for stock photo search. Focus on: subject, action, setting, lighting, mood. Return ONLY the keywords separated by spaces, nothing else. Example: "woman laptop cafe warm natural light candid"' }
+            ]
+          }]
+        })
+      }
+    );
+
+    if (!geminiRes.ok) {
+      const errText = await geminiRes.text();
+      console.error('Gemini describe error:', errText);
+      return res.status(500).json({ error: 'Gemini API error' });
+    }
+
+    const data = await geminiRes.json();
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    // Clean up: remove quotes, punctuation, limit to 8 words
+    const keywords = text.replace(/["'.,;:!?]/g, '').trim().split(/\s+/).slice(0, 8).join(' ');
+
+    res.json({ keywords });
+  } catch (err) {
+    console.error('Describe image error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ─── START SERVER ───
 app.listen(PORT, () => {
   console.log(`PDP Visual Studio API Proxy | Port: ${PORT} | Claude: ${CLAUDE_API_KEY ? 'OK' : 'missing'} | Gemini: ${GEMINI_API_KEY ? 'OK' : 'missing'}`);
