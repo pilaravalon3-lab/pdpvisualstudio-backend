@@ -404,6 +404,68 @@ app.post('/api/describe-image', async (req, res) => {
   }
 });
 
+// ─── PINTEREST → PROMPT ───
+app.post('/api/pinterest-prompt', async (req, res) => {
+  try {
+    const { image, mimeType, mode, modeInstruction, clientContext } = req.body;
+    if (!image) return res.status(400).json({ error: 'No image' });
+    if (!GEMINI_API_KEY) return res.status(500).json({ error: 'Gemini key missing' });
+
+    const systemPrompt = `You are an expert art director and visual strategist for social media design.
+
+Analyze this reference image in detail, then generate a prompt based on the requested mode.
+
+FIRST, provide a brief analysis (2-3 sentences) describing: composition, lighting, color palette, mood, typography style if visible, and overall aesthetic.
+
+SECOND, extract the 5 dominant colors as hex codes.
+
+THIRD, generate the prompt according to this instruction: ${modeInstruction || 'Recreate faithfully'}
+${clientContext || ''}
+
+Respond in this exact JSON format (no markdown, no backticks):
+{"analysis":"your analysis here","colors":["#hex1","#hex2","#hex3","#hex4","#hex5"],"prompt":"your detailed prompt here, written in English, suitable for image generation AI"}`;
+
+    const geminiRes = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          generationConfig: { temperature: 0.7, maxOutputTokens: 2048, thinking_config: { thinking_budget: 0 } },
+          contents: [{
+            parts: [
+              { inlineData: { mimeType: mimeType || 'image/jpeg', data: image } },
+              { text: systemPrompt }
+            ]
+          }]
+        })
+      }
+    );
+
+    if (!geminiRes.ok) {
+      const errText = await geminiRes.text();
+      console.error('Gemini pinterest error:', errText);
+      return res.status(500).json({ error: 'Gemini API error' });
+    }
+
+    const data = await geminiRes.json();
+    let text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    
+    // Clean and parse JSON
+    text = text.replace(/```json|```/g, '').trim();
+    try {
+      const parsed = JSON.parse(text);
+      res.json(parsed);
+    } catch {
+      // Fallback: return raw text as prompt
+      res.json({ analysis: '', colors: [], prompt: text });
+    }
+  } catch (err) {
+    console.error('Pinterest prompt error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ─── START SERVER ───
 app.listen(PORT, () => {
   console.log(`PDP Visual Studio API Proxy | Port: ${PORT} | Claude: ${CLAUDE_API_KEY ? 'OK' : 'missing'} | Gemini: ${GEMINI_API_KEY ? 'OK' : 'missing'}`);
