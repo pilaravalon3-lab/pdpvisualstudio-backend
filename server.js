@@ -278,6 +278,54 @@ async function callGemini(systemPrompt, userMsg) {
 
 // Gemini — Text response
 async function callGeminiText(systemPrompt, userMsg) {
+
+// Vision call for image analysis
+async function callGeminiVision(systemPrompt, parts) {
+  const apiKey = process.env.GEMINI_API_KEY;
+  const model = 'gemini-2.5-flash';
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+  
+  // Build parts array for Gemini
+  const contentParts = [];
+  for (const part of parts) {
+    if (part.type === 'text') {
+      contentParts.push({ text: part.text });
+    } else if (part.type === 'image' && part.data) {
+      // Extract base64 data and mime type
+      const match = part.data.match(/^data:(image\/\w+);base64,(.+)$/);
+      if (match) {
+        contentParts.push({
+          inline_data: { mime_type: match[1], data: match[2] }
+        });
+      }
+    }
+  }
+  
+  const body = {
+    system_instruction: { parts: [{ text: systemPrompt }] },
+    contents: [{ parts: contentParts }],
+    generationConfig: { temperature: 0.7, maxOutputTokens: 2048 }
+  };
+  
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  
+  if (!resp.ok) {
+    const errText = await resp.text();
+    throw new Error(`Gemini vision error ${resp.status}: ${errText.substring(0, 200)}`);
+  }
+  
+  const data = await resp.json();
+  const raw = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+  try {
+    return JSON.parse(raw.replace(/```json|```/g, '').trim());
+  } catch {
+    return { raw };
+  }
+}
   const response = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
     {
@@ -467,6 +515,83 @@ Respond in this exact JSON format (no markdown, no backticks):
 });
 
 // ─── START SERVER ───
+// ═══ GENERATE CAPTIONS ═══
+app.post('/api/generate-captions', async (req, res) => {
+  try {
+    const { copy, client, tone, pilar } = req.body;
+    if (!copy) return res.status(400).json({ error: 'Missing copy' });
+    
+    const systemPrompt = `Sos un community manager experto en Instagram para marcas argentinas. 
+Generá 3 variantes de caption para un posteo de Instagram.
+
+REGLAS:
+- Escribí en español argentino (vos, usá, etc)
+- Cada caption debe tener entre 2 y 5 líneas
+- Incluí emojis relevantes pero sin abusar
+- Variante 1: directa y concisa
+- Variante 2: más storytelling / emocional
+- Variante 3: con pregunta o CTA fuerte
+- Agregá 15-20 hashtags relevantes al final (compartidos entre las 3)
+- Tono: ${tone || 'profesional'}
+
+Respondé SOLO en JSON con esta estructura exacta:
+{
+  "captions": [
+    { "label": "Directa", "text": "..." },
+    { "label": "Storytelling", "text": "..." },
+    { "label": "CTA fuerte", "text": "..." }
+  ],
+  "hashtags": ["#tag1", "#tag2", "..."]
+}`;
+    
+    const userMsg = `Cliente: ${client || 'Sin especificar'}
+Pilar: ${pilar || 'General'}
+Bajada del post: ${copy}`;
+    
+    const result = await callGemini(systemPrompt, userMsg);
+    res.json(result);
+  } catch (e) {
+    console.error('generate-captions error:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ═══ STYLE MATCH ═══
+app.post('/api/style-match', async (req, res) => {
+  try {
+    const { image1, image2 } = req.body;
+    if (!image1 || !image2) return res.status(400).json({ error: 'Need 2 images' });
+    
+    const systemPrompt = `Sos un director de arte que analiza estilos visuales.
+Compará las 2 imágenes y describí:
+1. Qué elementos visuales comparten (luz, paleta, composición, mood)
+2. Qué las diferencia
+3. Un "estilo puente" que combine lo mejor de ambas
+4. Keywords de búsqueda para encontrar imágenes con ese estilo combinado
+
+Respondé SOLO en JSON:
+{
+  "shared": ["elemento1", "elemento2", ...],
+  "differences": ["diff1", "diff2", ...],
+  "bridge_style": "descripción del estilo puente",
+  "keywords": ["kw1", "kw2", ...]
+}`;
+
+    const userMsg = [
+      { type: 'text', text: 'Compará estas 2 imágenes:' },
+      { type: 'image', data: image1 },
+      { type: 'image', data: image2 }
+    ];
+    
+    // Use vision endpoint
+    const result = await callGeminiVision(systemPrompt, userMsg);
+    res.json(result);
+  } catch (e) {
+    console.error('style-match error:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`PDP Visual Studio API Proxy | Port: ${PORT} | Claude: ${CLAUDE_API_KEY ? 'OK' : 'missing'} | Gemini: ${GEMINI_API_KEY ? 'OK' : 'missing'}`);
 });
